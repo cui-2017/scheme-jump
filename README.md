@@ -4,6 +4,8 @@
 
 核心逻辑只有一个：**把关键词按模板拼成 URL Scheme，交给系统去唤起目标 App。**
 
+> 为什么这么设计？技术选型、架构决策、已知边界见 **[ARCHITECTURE.md](./ARCHITECTURE.md)**。
+
 ---
 
 ## 一、功能
@@ -21,33 +23,24 @@
 
 ---
 
-## 二、云端构建（不需要本地装 Android Studio）
+## 二、获取 APK
 
-### 1. 推到 GitHub
+本仓库已接 GitHub Actions，推送到 `main` 会自动构建。
+
+1. 打开仓库的 **Actions** 标签，点最新一次 `Build APK` 运行
+2. 页面拉到底部 **Artifacts**，下载 `SchemeJump-debug-apk.zip`
+3. 解压得到 `app-debug.apk`，传到手机安装（需允许「安装未知来源应用」）
+
+手动触发：Actions → Build APK → **Run workflow**。
+
+### 本地构建（可选）
+
+装了 Android Studio 可直接打开本目录构建；或用命令行（需 JDK 17）：
 
 ```bash
-cd schemejump
-git init
-git add .
-git commit -m "init: scheme jump app"
-git branch -M main
-git remote add origin https://github.com/<你的用户名>/<仓库名>.git
-git push -u origin main
+gradle assembleDebug
+# 产物：app/build/outputs/apk/debug/app-debug.apk
 ```
-
-### 2. 等自动构建
-
-推送后，GitHub 仓库页 → **Actions** 标签 → 会看到 `Build APK` 正在跑，约 3~6 分钟。
-
-也可以手动触发：Actions → Build APK → Run workflow。
-
-### 3. 下载 APK
-
-构建成功后，点进那次运行 → 页面底部 **Artifacts** → 下载 `SchemeJump-debug-apk.zip`，解压得到 `app-debug.apk`。
-
-### 4. 安装
-
-把 APK 传到手机安装，需要允许「安装未知来源应用」。
 
 ---
 
@@ -112,6 +105,8 @@ git push -u origin main
 ```
 schemejump/
 ├── .github/workflows/build.yml   # 云端构建
+├── ARCHITECTURE.md               # 架构决策与技术选型
+├── README.md                     # 本文件
 ├── app/src/main/
 │   ├── AndroidManifest.xml       # 权限 + queries 声明
 │   ├── java/com/traveler/schemejump/
@@ -127,3 +122,52 @@ schemejump/
 ```
 
 **技术栈**：Kotlin 2.0.21 + Jetpack Compose (BOM 2024.12.01) + AGP 8.7.3 + Gradle 8.11.1，`minSdk 24 / targetSdk 35`，零数据库、零第三方 SDK。
+
+---
+
+## 七、未来优化方向
+
+### 7.1 规则添加：在线规则 + 一键导入 ⭐
+
+**现状的短板**：规则目前只能靠人在 App 里一条条手工填。第三方 App 改了协议，你得自己发现、自己修。规则是「死」的，工具就会慢慢失效。
+
+**目标**：把规则从「本地手工数据」变成「可分发的数据」。
+
+**形态一 · 在线规则**
+
+- 规则库以 JSON 托管在仓库里（如 `rules/builtin.json`），与 App 版本解耦
+- App 内新增「规则市场」页：浏览已收录平台，一键订阅
+- 订阅后启动时自动比对版本，有新版就提示更新
+- 任何人都可以提 PR 贡献新平台，规则库持续生长而无需发版
+
+**形态二 · 一键添加（JS 脚本导入）**
+
+在 App 内粘贴一段 JS 脚本，自动识别并写入规则，全程不碰表单。脚本由 AI 生成，或从社区复制。
+
+脚本格式（草案）：
+
+```js
+addPlatform({
+  name: "网易云音乐",
+  package: "com.netease.cloudmusic",
+  targets: [
+    { label: "搜索",     url: "orpheus://search?keyword={kw}" },
+    { label: "我的收藏", url: "orpheus://my/fav" }
+  ]
+});
+```
+
+**典型用法**：直接跟 AI 说「帮我把网易云音乐、高德地图、拼多多加进来」，AI 产出这样一段脚本，粘贴进 App 即可完成导入——不用手填包名、不用查 scheme。
+
+**为什么值得做**：这是把配置变成「可分发的数据」的关键一步。规则能更新，工具才能长期活下去；否则它只是一次性脚本。
+
+详见 [ARCHITECTURE.md 第 8 节](./ARCHITECTURE.md#8-后续路线)。
+
+### 7.2 其他方向
+
+| 优先级 | 事项 | 价值 |
+|---|---|---|
+| P2 | 桌面快捷方式 / 小组件 | 点一下直达目标 App，跳过开 App 这一步 |
+| P2 | 配置导入导出 | 换机迁移与备份，也是「一键添加」的天然补充 |
+| P3 | 跳转历史与频次排序 | 常用平台自动排前 |
+| P3 | release 签名 + 正式版 | 当前 debug 签名，仅适合自用；长期使用需配 keystore |
